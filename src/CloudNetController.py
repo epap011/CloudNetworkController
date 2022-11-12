@@ -456,7 +456,20 @@ class SwitchWithPaths (EventMixin):
         self.connection.send(msg)
 
     def send_arp_reply(self, packet, dst_port, req_mac): 
-        pass
+        arp_reply          = arp()
+        arp_reply.opcode   = arp.REPLY
+        arp_reply.hwsrc    = EthAddr(req_mac)
+        arp_reply.hwdst    = packet.src
+        arp_reply.protosrc = packet.next.protodst
+        arp_reply.protodst = packet.next.protosrc
+
+        ether         = ethernet()
+        ether.type    = ethernet.ARP_TYPE
+        ether.src     = EthAddr(req_mac)
+        ether.dst     = packet.src
+        ether.payload = arp_reply
+
+        self.send_packet(dst_port, ether.pack())
 
     def install_output_flow_rule(self, outport, match, idle_timeout=0, hard_timeout=0):
         msg=of.ofp_flow_mod()
