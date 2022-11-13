@@ -281,8 +281,38 @@ class CloudNetController (EventMixin):
 
 
     def install_end_to_end_IP_path(self, event, dst_dpid, final_port, packet):
-        #WRITE YOUR CODE HERE!
-        pass
+        print('##### install_end_to_end_IP_path #####')
+
+        ofp_match = of.ofp_match()
+        ofp_match.dl_type = 0x800
+        ofp_match.nw_src  = packet.next.srcip
+        ofp_match.nw_dst  = packet.next.dstip
+
+        host_src_ip  = packet.next.srcip
+        protocol     = packet.next.protocol
+        protocol_num = -1
+        
+        if(protocol == 6):
+            protocol_num = 6
+        else:
+            protocol_num = 17
+
+        switch_of_src_host             = self.switches[self.arpmap[host_src_ip][1]]
+        shortest_paths_from_src_to_dst = list(switch_of_src_host._paths_per_proto[dst_dpid][protocol_num])
+        shortest_path_from_src_to_dst  = list(shortest_paths_from_src_to_dst[0])
+       
+        outport = -1
+        shortest_path_from_src_to_dst.reverse()
+        for switch_index in range(len(shortest_path_from_src_to_dst)):
+            #if switch-to-dest-host is reached
+            if(switch_index == 0):
+                outport = final_port
+            else:
+                outport = self.sw_sw_ports[shortest_path_from_src_to_dst[switch_index], shortest_path_from_src_to_dst[switch_index-1]]
+            
+            self.switches[shortest_path_from_src_to_dst[switch_index]].install_output_flow_rule(outport, ofp_match, idle_timeout=10)
+
+        self.switches[event.dpid].send_packet(outport, packet)
 
         
     def install_migrated_end_to_end_IP_path(self, event, dst_dpid, dst_port, packet, forward_path=True):
@@ -446,8 +476,9 @@ class SwitchWithPaths (EventMixin):
             self._listeners = None
 
     def flood_on_switch_edge(self, packet, no_flood_ports):
-        #WRITE YOUR CODE HERE!  
-        pass
+        for port in self.ports:
+            if port.port_no not in no_flood_ports and port.port_no != 65534:
+                self.send_packet(port.port_no, packet.pack())
 
     def send_packet(self, outport, packet_data=None):
         msg = of.ofp_packet_out(in_port=of.OFPP_NONE)
@@ -522,6 +553,8 @@ def ShortestPaths(switches, adjs):
                 print(adj_src)
                 switches[adj_src].appendPaths(adj_dest, list(all_shortests_paths_list))
     except:nx.NetworkXNoPath()
+
+    return True
 
 def str_to_bool(str):
     assert(str in ['True', 'False'])
