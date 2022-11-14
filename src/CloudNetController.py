@@ -165,8 +165,10 @@ class CloudNetController (EventMixin):
                 #FIREWALL functionality
                 if self.firewall_capability:
                     try:
-                        #WRITE YOUR CODE HERE!
-                        pass
+                        if(self.firewall_policies[srcip] != self.firewall_policies[dstip]):
+                            self.drop_packets(dpid, packet)
+                            return
+
                     except KeyError:
                         log.info("IPs not covered by policy!")
                         return
@@ -192,8 +194,10 @@ class CloudNetController (EventMixin):
                 #FIREWALL functionality
                 if self.firewall_capability:
                     try:
-                        #WRITE YOUR CODE HERE!
-                        pass
+                        if(self.firewall_policies[srcip] != self.firewall_policies[dstip]):
+                            self.drop_packets(dpid, packet)
+                            return
+                        
                     except KeyError:
                         return
 
@@ -224,8 +228,9 @@ class CloudNetController (EventMixin):
             #FIREWALL functionality
             if self.firewall_capability:
                 try:
-                    #WRITE YOUR CODE HERE!
-                    pass
+                    if(self.firewall_policies[srcip] != self.firewall_policies[dstip]):
+                            self.drop_packets(dpid, packet)
+                            return
                 except KeyError:
                     log.info("IPs not covered by policy!")
                     return
