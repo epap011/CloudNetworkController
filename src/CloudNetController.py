@@ -290,13 +290,13 @@ class CloudNetController (EventMixin):
 
         ofp_match = of.ofp_match()
         ofp_match.dl_type = 0x800
-        ofp_match.nw_src  = packet.next.srcip
-        ofp_match.nw_dst  = packet.next.dstip
+        ofp_match.nw_src  = packet.payload.srcip
+        ofp_match.nw_dst  = packet.payload.dstip
 
-        host_src_ip  = packet.next.srcip
-        protocol     = packet.next.protocol
+        host_src_ip  = packet.payload.srcip
+        protocol     = packet.payload.protocol
         protocol_num = -1
-        
+
         if(protocol == 6):
             protocol_num = 6
         else:
@@ -309,7 +309,6 @@ class CloudNetController (EventMixin):
         outport = -1
         shortest_path_from_src_to_dst.reverse()
         for switch_index in range(len(shortest_path_from_src_to_dst)):
-            #if switch-to-dest-host is reached
             if(switch_index == 0):
                 outport = final_port
             else:
@@ -317,12 +316,73 @@ class CloudNetController (EventMixin):
             
             self.switches[shortest_path_from_src_to_dst[switch_index]].install_output_flow_rule(outport, ofp_match, idle_timeout=10)
 
-        self.switches[event.dpid].send_packet(outport, packet)
+        self.switches[self.arpmap[host_src_ip][1]].send_packet(outport, packet)
 
         
     def install_migrated_end_to_end_IP_path(self, event, dst_dpid, dst_port, packet, forward_path=True):
-        #WRITE YOUR CODE HERE!
-        pass
+        print('##### install_migrated_end_to_end_IP_path #####')
+
+        ofp_match = of.ofp_match()
+        ofp_match.dl_type = 0x800
+        ofp_match.nw_src  = packet.payload.srcip
+        ofp_match.nw_dst  = packet.payload.dstip
+        
+        protocol     = packet.payload.protocol
+        protocol_num = -1
+        if(protocol == 6):
+            protocol_num = 6
+        else:
+            protocol_num = 17
+
+        print(self.sw_sw_ports)
+        print('\n')
+        print(self.arpmap)
+        print('\n')
+
+        if(forward_path == True):
+            expected_dst_ip = packet.payload.dstip
+            actual_dst_ip   = self.old_migrated_IPs[expected_dst_ip]
+            (actual_dst_mac, actual_dst_dpid, actual_dst_port) = self.arpmap[actual_dst_ip]
+
+            switch_of_src_host             = self.switches[self.arpmap[packet.payload.srcip][1]]
+            shortest_paths_from_src_to_dst = list(switch_of_src_host._paths_per_proto[dst_dpid][protocol_num])
+            shortest_path_from_src_to_dst  = list(shortest_paths_from_src_to_dst[0])
+
+            print(shortest_path_from_src_to_dst)
+            print('\n')
+        
+            outport = -1
+            shortest_path_from_src_to_dst.reverse()
+            for switch_index in range(len(shortest_path_from_src_to_dst)):
+                if(switch_index == 0):
+                    outport = dst_port #GAMW TO SPITI MOU!!!!
+                else:
+                    outport = self.sw_sw_ports[shortest_path_from_src_to_dst[switch_index], shortest_path_from_src_to_dst[switch_index-1]]
+                
+                self.switches[shortest_path_from_src_to_dst[switch_index]].install_forward_migration_rule(outport, actual_dst_mac, actual_dst_ip, ofp_match, idle_timeout=10)
+
+            self.switches[self.arpmap[packet.payload.srcip][1]].send_forward_migrated_packet(outport, actual_dst_mac, actual_dst_ip, packet.pack())
+        
+        else:
+            expected_source_ip = packet.payload.srcip #h5
+            actual_source_ip   = self.new_migrated_IPs[expected_source_ip]
+            (actual_src_mac, actual_src_dpid, actual_src_port) = self.arpmap[actual_source_ip] #h1's mac, dpid, port
+
+            switch_of_src_host             = self.switches[self.arpmap[packet.payload.srcip][1]] #h5's switch
+            shortest_paths_from_src_to_dst = list(switch_of_src_host._paths_per_proto[dst_dpid][protocol_num]) #shortest paths from h5 to h3(e.g)
+            shortest_path_from_src_to_dst  = list(shortest_paths_from_src_to_dst[0]) #shortest path from h5 to h3(e.g)
+        
+            outport = -1
+            shortest_path_from_src_to_dst.reverse()
+            for switch_index in range(len(shortest_path_from_src_to_dst)):
+                if(switch_index == 0):
+                    outport = dst_port #port of h3(e.g)
+                else:
+                    outport = self.sw_sw_ports[shortest_path_from_src_to_dst[switch_index], shortest_path_from_src_to_dst[switch_index-1]]
+                
+                self.switches[shortest_path_from_src_to_dst[switch_index]].install_reverse_migration_rule(outport, actual_src_mac, actual_source_ip, ofp_match, idle_timeout=10)
+
+            self.switches[self.arpmap[packet.payload.srcip][1]].send_reverse_migrated_packet(outport, actual_src_mac, actual_source_ip, packet.pack())
 
 
     def handle_migration(self, old_IP, new_IP):
@@ -373,7 +433,6 @@ class CloudNetController (EventMixin):
             self.adjs[dpid1] = set([])
         if dpid2 not in self.adjs:
             self.adjs[dpid2] = set([])
-
         if event.added:
             self.sw_sw_ports[(dpid1,dpid2)] = port1
             self.sw_sw_ports[(dpid2,dpid1)] = port2
@@ -517,29 +576,82 @@ class SwitchWithPaths (EventMixin):
         self.connection.send(msg)
 
     def install_drop_flow_rule(self, match, idle_timeout=0, hard_timeout=0):
-        msg=of.ofp_flow_mod()
-        msg.match = match
-        msg.command = of.OFPFC_MODIFY_STRICT
+        msg              = of.ofp_flow_mod()
+        msg.command      = of.OFPFC_MODIFY_STRICT
+        msg.match        = match
         msg.idle_timeout = idle_timeout
         msg.hard_timeout = hard_timeout
         msg.actions = [] #empty action list for dropping packets
         self.connection.send(msg)
 
     def send_forward_migrated_packet(self, outport, dst_mac, dst_ip, packet_data=None):
-        #WRITE YOUR CODE HERE!
-        pass
+        
+        print('---send_forward_migrated_packet---')
+        print('dst_mac: ', dst_mac)
+        print('dst_ip: ', dst_ip)
+        print('outport: ', outport)
+        actions = []
+        actions.append(of.ofp_action_nw_addr.set_dst(dst_ip))
+        actions.append(of.ofp_action_dl_addr.set_dst(dst_mac))
+        actions.append(of.ofp_action_output(port = outport))
+        
+        msg         = of.ofp_packet_out(in_port=of.OFPP_NONE)
+        msg.data    = packet_data
+        msg.actions = actions
+        
+        self.connection.send(msg)
 
     def send_reverse_migrated_packet(self, outport, src_mac, src_ip, packet_data=None):
-        #WRITE YOUR CODE HERE!
-        pass
+        print('---send_reverse_migrated_packet---')
+        print('src_mac: ', src_mac)
+        print('src_ip: ', src_ip)
+        print('outport: ', outport)
+        actions = []
+        actions.append(of.ofp_action_nw_addr.set_src(src_ip))
+        actions.append(of.ofp_action_dl_addr.set_src(src_mac))
+        actions.append(of.ofp_action_output(port = outport))
+        
+        msg         = of.ofp_packet_out(in_port=of.OFPP_NONE)
+        msg.data    = packet_data
+        msg.actions = actions
+        
+        self.connection.send(msg)
         
     def install_forward_migration_rule(self, outport, dst_mac, dst_ip, match, idle_timeout=0, hard_timeout=0):
-        #WRITE YOUR CODE HERE!
-        pass
+        print('---install_forward_migration_rule---')
+        print('dst_mac: ', dst_mac)
+        print('dst_ip: ', dst_ip)
+        print('outport: ', outport)
+        actions = []
+        actions.append(of.ofp_action_nw_addr.set_dst(dst_ip))
+        actions.append(of.ofp_action_dl_addr.set_dst(dst_mac))
+        actions.append(of.ofp_action_output(port = outport))
+        
+        msg              = of.ofp_flow_mod()
+        msg.match        = match
+        msg.idle_timeout = idle_timeout
+        msg.hard_timeout = hard_timeout
+        msg.actions      = actions
+        
+        self.connection.send(msg)
 
     def install_reverse_migration_rule(self, outport, src_mac, src_ip, match, idle_timeout=0, hard_timeout=0):
-        #WRITE YOUR CODE HERE!
-        pass
+        print('---install_reverse_migration_rule---')
+        print('src_mac: ', src_mac)
+        print('src_ip: ', src_ip)
+        print('outport: ', outport)
+        actions=[]
+        actions.append(of.ofp_action_nw_addr.set_src(src_ip))
+        actions.append(of.ofp_action_dl_addr.set_src(src_mac))
+        actions.append(of.ofp_action_output(port = outport))
+        
+        msg              = of.ofp_flow_mod()
+        msg.match        = match
+        msg.idle_timeout = idle_timeout
+        msg.hard_timeout = hard_timeout
+        msg.actions      = actions
+        
+        self.connection.send(msg)
 
 
 def ShortestPaths(switches, adjs):
