@@ -334,28 +334,20 @@ class CloudNetController (EventMixin):
         else:
             protocol_num = 17
 
-        print(self.sw_sw_ports)
-        print('\n')
-        print(self.arpmap)
-        print('\n')
-
         if(forward_path == True):
-            expected_dst_ip = packet.payload.dstip
-            actual_dst_ip   = self.old_migrated_IPs[expected_dst_ip]
+            expected_dst_ip = packet.payload.dstip #the unavailable host's ip (e.g h1) 
+            actual_dst_ip   = self.old_migrated_IPs[expected_dst_ip] #the replacement of the unavailable host (e.g h1 -> h5)
             (actual_dst_mac, actual_dst_dpid, actual_dst_port) = self.arpmap[actual_dst_ip]
 
             switch_of_src_host             = self.switches[self.arpmap[packet.payload.srcip][1]]
             shortest_paths_from_src_to_dst = list(switch_of_src_host._paths_per_proto[dst_dpid][protocol_num])
             shortest_path_from_src_to_dst  = list(shortest_paths_from_src_to_dst[0])
-
-            print(shortest_path_from_src_to_dst)
-            print('\n')
         
             outport = -1
             shortest_path_from_src_to_dst.reverse()
             for switch_index in range(len(shortest_path_from_src_to_dst)):
                 if(switch_index == 0):
-                    outport = dst_port #GAMW TO SPITI MOU!!!!
+                    outport = dst_port
                 else:
                     outport = self.sw_sw_ports[shortest_path_from_src_to_dst[switch_index], shortest_path_from_src_to_dst[switch_index-1]]
                 
@@ -364,19 +356,19 @@ class CloudNetController (EventMixin):
             self.switches[self.arpmap[packet.payload.srcip][1]].send_forward_migrated_packet(outport, actual_dst_mac, actual_dst_ip, packet.pack())
         
         else:
-            expected_source_ip = packet.payload.srcip #h5
-            actual_source_ip   = self.new_migrated_IPs[expected_source_ip]
-            (actual_src_mac, actual_src_dpid, actual_src_port) = self.arpmap[actual_source_ip] #h1's mac, dpid, port
+            expected_source_ip = packet.payload.srcip #the ip of the replacement of unavailable host (e.g h5)
+            actual_source_ip   = self.new_migrated_IPs[expected_source_ip] #the ip of the actually host(transparency) (e.g h1)
+            (actual_src_mac, actual_src_dpid, actual_src_port) = self.arpmap[actual_source_ip]
 
-            switch_of_src_host             = self.switches[self.arpmap[packet.payload.srcip][1]] #h5's switch
-            shortest_paths_from_src_to_dst = list(switch_of_src_host._paths_per_proto[dst_dpid][protocol_num]) #shortest paths from h5 to h3(e.g)
-            shortest_path_from_src_to_dst  = list(shortest_paths_from_src_to_dst[0]) #shortest path from h5 to h3(e.g)
+            switch_of_src_host             = self.switches[self.arpmap[packet.payload.srcip][1]]
+            shortest_paths_from_src_to_dst = list(switch_of_src_host._paths_per_proto[dst_dpid][protocol_num])
+            shortest_path_from_src_to_dst  = list(shortest_paths_from_src_to_dst[0])
         
             outport = -1
             shortest_path_from_src_to_dst.reverse()
             for switch_index in range(len(shortest_path_from_src_to_dst)):
                 if(switch_index == 0):
-                    outport = dst_port #port of h3(e.g)
+                    outport = dst_port
                 else:
                     outport = self.sw_sw_ports[shortest_path_from_src_to_dst[switch_index], shortest_path_from_src_to_dst[switch_index-1]]
                 
